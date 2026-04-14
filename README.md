@@ -74,13 +74,22 @@ pip install -r requirements.txt
 ```
 
 ## Usage
-- Place your trained YOLO model in the project directory.
-- Ensure data.yaml contains your dataset configuration and class names.
-- Run the traffic simulation:
-``` bash 
+- Place your trained YOLO model in the project directory (e.g. inside `models/`).
+- Ensure `data.yaml` contains your dataset configuration and class names.
+
+### Running the Dashboard (Web Interface)
+The project includes a web-based dashboard to visualize real-time traffic data, view analytics, and upload videos for vehicle detection. To run the dashboard:
+```bash
+python app.py
+```
+After starting the server, open your web browser and navigate to `http://localhost:5000` or `http://127.0.0.1:5000`.
+
+### Running the Traffic Simulation (Console)
+To run the adaptive traffic simulation script directly:
+```bash 
 python adaptive-traffic.py
 ```
-- Generated outputs and plots will appear in the outputs/ directory.
+- Generated outputs and plots will appear in the `outputs/` directory.
 
 ## Outputs
 ### Simulation Output (Colab)
