@@ -1,3 +1,4 @@
+
 # 🚦 Intelligent Traffic Light Control for Diverse Vehicles Using Computer Vision
 _**Real-Time Traffic Signal Optimization using YOLO Object Detection and Python.**_ 
 
@@ -166,5 +167,6 @@ Possible improvements include:
 ## License
 This project is licensed under the MIT License.
 See the LICENSE file for more information.
+
 
 
