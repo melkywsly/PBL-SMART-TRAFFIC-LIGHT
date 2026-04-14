@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Traffic Light Dashboard — 4 Lane</title>
+  <meta name="description" content="Adaptive 4-lane intersection traffic light dashboard powered by YOLOv8 Ultralytics." />
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ── LOADER OVERLAY ── -->
+<div class="loader-overlay" id="loader">
+  <div class="spinner"></div>
+  <p class="loader-label" id="loaderLabel">Processing…</p>
+</div>
+
+<!-- ── TOAST ── -->
+<div class="toast" id="toast"></div>
+
+<div class="container">
+
+  <!-- ── HEADER ── -->
+  <header class="header">
+    <div>
+      <h1>🚦 Smart Traffic <span>Intersection Dashboard</span></h1>
+      <p class="header-meta">4-Lane Adaptive Signal Control · YOLOv8 Ultralytics · Non-Realtime Analysis</p>
+      <p id="clock"></p>
+    </div>
+    <div class="header-right">
+      <div class="badge">
+        <span class="dot"></span>
+        System Ready
+      </div>
+      <button class="process-all-btn" id="processAllBtn" disabled>⚙️ Process All Lanes</button>
+    </div>
+  </header>
+
+  <!-- ── SUMMARY CARDS ── -->
+  <section class="cards">
+    <div class="card">
+      <div class="card-icon">🚗</div>
+      <div class="card-label">Processed Vehicles</div>
+      <div class="card-value" id="totalVehicles">—</div>
+      <div class="card-sub">Unique vehicles tracked (all lanes)</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">🟢</div>
+      <div class="card-label">Green Lane</div>
+      <div class="card-value" id="greenLane">—</div>
+      <div class="card-sub">Highest priority direction</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">⏱</div>
+      <div class="card-label">Green Duration</div>
+      <div class="card-value" id="greenTime">—</div>
+      <div class="card-sub">Adaptive signal time</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">📊</div>
+      <div class="card-label">Peak Density</div>
+      <div class="card-value" id="peakDensity">—</div>
+      <div class="card-sub">Weighted vehicle score</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">📡</div>
+      <div class="card-label">Lanes Ready</div>
+      <div class="card-value" id="lanesReady">0 / 4</div>
+      <div class="card-sub">Videos uploaded</div>
+    </div>
+  </section>
+
+  <!-- ── VEHICLE TYPE BREAKDOWN CARDS ── -->
+  <section class="cards type-cards">
+    <div class="card type-card motor-card">
+      <div class="card-icon">🛵</div>
+      <div class="card-label">Motor</div>
+      <div class="card-value" id="totalMotor">0</div>
+      <div class="card-sub">Total motorcycles detected</div>
+    </div>
+    <div class="card type-card car-card">
+      <div class="card-icon">🚗</div>
+      <div class="card-label">Car</div>
+      <div class="card-value" id="totalCar">0</div>
+      <div class="card-sub">Total cars detected</div>
+    </div>
+    <div class="card type-card bus-card">
+      <div class="card-icon">🚌</div>
+      <div class="card-label">Bus</div>
+      <div class="card-value" id="totalBus">0</div>
+      <div class="card-sub">Total buses detected</div>
+    </div>
+    <div class="card type-card truck-card">
+      <div class="card-icon">🚛</div>
+      <div class="card-label">Truck</div>
+      <div class="card-value" id="totalTruck">0</div>
+      <div class="card-sub">Total trucks detected</div>
+    </div>
+  </section>
+
+  <!-- ── 4-LANE UPLOAD GRID ── -->
+  <section class="upload-section">
+    <h2>📹 Upload Lane Videos</h2>
+    <p class="section-sub">Upload a separate CCTV video for each lane direction. You can process lanes individually or process all at once.</p>
+    <div class="lanes-grid" id="lanesGrid">
+      <!-- injected by JS -->
+    </div>
+  </section>
+
+  <!-- ── INTERSECTION VISUALIZER ── -->
+  <section class="intersection-section">
+    <h2>🗺️ Intersection Overview</h2>
+    <div class="intersection-wrap">
+      <div class="intersection-map" id="intersectionMap">
+        <!-- North -->
+        <div class="lane-arm arm-north" id="arm-North">
+          <div class="lane-label">⬆ North</div>
+          <div class="traffic-light-pole">
+            <div class="traffic-light" id="tl-North">
+              <div class="tl-light red-light" id="red-North"></div>
+              <div class="tl-light yellow-light" id="yellow-North"></div>
+              <div class="tl-light green-light" id="green-North"></div>
+            </div>
+          </div>
+          <div class="arm-density" id="density-North">—</div>
+        </div>
+        <!-- East -->
+        <div class="lane-arm arm-east" id="arm-East">
+          <div class="lane-label">➡ East</div>
+          <div class="traffic-light-pole">
+            <div class="traffic-light" id="tl-East">
+              <div class="tl-light red-light" id="red-East"></div>
+              <div class="tl-light yellow-light" id="yellow-East"></div>
+              <div class="tl-light green-light" id="green-East"></div>
+            </div>
+          </div>
+          <div class="arm-density" id="density-East">—</div>
+        </div>
+        <!-- Center box -->
+        <div class="intersection-center">
+          <div class="center-icon">🚦</div>
+          <div class="center-label">INTERSECTION</div>
+        </div>
+        <!-- South -->
+        <div class="lane-arm arm-south" id="arm-South">
+          <div class="arm-density" id="density-South">—</div>
+          <div class="traffic-light-pole">
+            <div class="traffic-light" id="tl-South">
+              <div class="tl-light red-light" id="red-South"></div>
+              <div class="tl-light yellow-light" id="yellow-South"></div>
+              <div class="tl-light green-light" id="green-South"></div>
+            </div>
+          </div>
+          <div class="lane-label">⬇ South</div>
+        </div>
+        <!-- West -->
+        <div class="lane-arm arm-west" id="arm-West">
+          <div class="arm-density" id="density-West">—</div>
+          <div class="traffic-light-pole">
+            <div class="traffic-light" id="tl-West">
+              <div class="tl-light red-light" id="red-West"></div>
+              <div class="tl-light yellow-light" id="yellow-West"></div>
+              <div class="tl-light green-light" id="green-West"></div>
+            </div>
+          </div>
+          <div class="lane-label">⬅ West</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SIGNAL STATUS CARDS ── -->
+  <section class="signal-section">
+    <h2>🚦 Signal Status per Lane</h2>
+    <div class="signal-grid" id="signalGrid">
+      <!-- injected by JS -->
+    </div>
+  </section>
+
+  <!-- ── PROCESSED VIDEO OUTPUTS ── -->
+  <section class="outputs-section" id="outputsSection" style="display:none">
+    <h2>🎬 Lane Detection Outputs</h2>
+    <div class="outputs-grid" id="outputsGrid">
+      <!-- injected by JS -->
+    </div>
+  </section>
+
+  <!-- ── CHARTS ── -->
+  <section class="chart-section">
+    <h2>📈 Analytics</h2>
+    <div class="chart-grid">
+      <div class="chart-box">
+        <h3>Vehicle Count per Lane</h3>
+        <canvas id="vehicleChart"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>Density Score Distribution</h3>
+        <canvas id="densityChart"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>Vehicle Type Breakdown</h3>
+        <canvas id="typeChart"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>Green Time Allocation</h3>
+        <canvas id="timeChart"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── DECISION LOG ── -->
+  <section class="log-section">
+    <div class="log-header-row">
+      <h2>📋 Decision Log</h2>
+      <button class="export-btn" id="exportBtn" disabled>⬇ Export CSV</button>
+    </div>
+    <div class="log-box">
+      <table>
+        <thead>
+          <tr>
+            <th>Frame</th>
+            <th style="color:#00ffff">🛵 Motor</th>
+            <th style="color:#ffc800">🚗 Car</th>
+            <th style="color:#00b4ff">🚌 Bus</th>
+            <th style="color:#ff6400">🚛 Truck</th>
+            <th>Active</th>
+            <th style="color:#22c55e">✅ Tracked</th>
+          </tr>
+        </thead>
+        <tbody id="logBody">
+          <tr><td colspan="7" style="color:var(--muted);text-align:center;padding:24px">Upload and process lane videos to see results.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div><!-- /container -->
+
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>

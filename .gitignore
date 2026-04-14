@@ -1,0 +1,61 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+
+# Virtual environment
+venv/
+.env/
+.venv/
+
+# =========================
+# Model (YOLO / AI)
+# =========================
+models/*.pt
+models/*.onnx
+models/*.engine
+
+# =========================
+# Output hasil processing
+# =========================
+outputs/
+processed/
+plots/
+output/
+
+# =========================
+# Upload / Video / Dataset
+# =========================
+uploads/
+*.mp4
+*.avi
+*.mov
+
+sample_dataset_images/
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# =========================
+# Environment variables
+# =========================
+.env
+
+# =========================
+# Static generated (optional)
+# =========================
+static/cache/
