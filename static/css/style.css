@@ -91,6 +91,23 @@ body {
 .process-all-btn:hover:not(:disabled) { opacity: .88; transform: translateY(-1px); }
 .process-all-btn:disabled { opacity: .4; cursor: not-allowed; }
 
+.logout-btn {
+  padding: 6px 14px;
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--red);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 8px;
+  font-size: .8rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all .2s;
+  white-space: nowrap;
+}
+.logout-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
+}
+
 /* ── SUMMARY CARDS ── */
 .cards {
   display: grid;

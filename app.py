@@ -4,7 +4,10 @@ import torch
 import numpy as np
 import uuid
 import threading
-from flask import Flask, request, jsonify, render_template, send_from_directory
+import mysql.connector
+from datetime import datetime
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask import Flask, request, jsonify, render_template, send_from_directory, session, redirect, url_for
 from werkzeug.utils import secure_filename
 
 # ─────────────────────────────────────────────
@@ -13,13 +16,20 @@ from werkzeug.utils import secure_filename
 BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER    = os.path.join(BASE_DIR, 'uploads')
 PROCESSED_FOLDER = os.path.join(BASE_DIR, 'processed')
-MODEL_PATH       = os.path.join(BASE_DIR, 'models', 'best.pt')
+MODEL_PATH       = os.path.join(BASE_DIR, 'models', 'yolov8n.pt')
 
 os.makedirs(UPLOAD_FOLDER,    exist_ok=True)
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024   # 500 MB
+app.secret_key = 'super-secret-traffic-key'
+DB_CONFIG = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '',
+    'database': 'traffic_system'
+}
 
 # ─────────────────────────────────────────────
 # MODEL (lazy-load once)
@@ -31,16 +41,9 @@ def get_model():
     global _model
     with _model_lock:
         if _model is None:
-            # best.pt is a YOLOv5 checkpoint — must load via torch.hub
-            _model = torch.hub.load(
-                'ultralytics/yolov5', 'custom',
-                path=MODEL_PATH, force_reload=False, verbose=False
-            )
-            # Raised confidence back to 0.35 to avoid detecting dashed lines as cars
-            _model.conf        = 0.35
-            _model.iou         = 0.50   # NMS IoU threshold
-            _model.agnostic    = False
-            _model.multi_label = False
+            from ultralytics import YOLO
+            # Initialize YOLOv8 model natively
+            _model = YOLO(MODEL_PATH)
     return _model
 
 
@@ -48,10 +51,16 @@ def get_model():
 # LABEL → CATEGORY MAPPING
 # ─────────────────────────────────────────────
 LABEL_MAP = {
-    'bikes': 'motor', 'scooter': 'motor', 'bicycle': 'motor', 'e-rickshaw': 'motor',
-    'car': 'car', 'SUV': 'car', 'taxi': 'car', 'van': 'car', 'auto_rickshaw': 'car',
-    'bus': 'bus', 'micro_bus': 'bus', 'school_bus': 'bus',
-    'truck': 'truck', 'mini_truck': 'truck', 'tempo': 'truck',
+    # COCO dataset classes mapping
+    'motorcycle': 'motor', 'bicycle': 'motor',
+    'car': 'car',
+    'bus': 'bus',
+    'truck': 'truck',
+    # Original custom dataset mappings just in case
+    'bikes': 'motor', 'scooter': 'motor', 'e-rickshaw': 'motor',
+    'SUV': 'car', 'taxi': 'car', 'van': 'car', 'auto_rickshaw': 'car',
+    'micro_bus': 'bus', 'school_bus': 'bus',
+    'mini_truck': 'truck', 'tempo': 'truck',
     'tractor': 'truck', 'transport_vehicle': 'truck',
 }
 
@@ -313,16 +322,20 @@ def process_lane_video(video_path, output_path):
         if frame_num % SAMPLE_INTERVAL != 0:
             continue
 
-        # YOLOv5 inference (best.pt is a YOLOv5 checkpoint)
-        results = model(frame, size=1280)
+        # YOLOv8 inference
+        results = model(frame, verbose=False)
         names   = model.names
 
         # ── Build detection list for this frame ──
         detections = []
-        for *box, conf, cls in results.xyxy[0].tolist():
-            x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
-            conf = float(conf)
-            cls  = int(cls)
+        for box in results[0].boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+            conf = float(box.conf[0])
+            cls  = int(box.cls[0])
+
+            # Apply hard confidence threshold (simulating previous model.conf = 0.35)
+            if conf < 0.35:
+                continue
 
             bw = x2 - x1
             bh = y2 - y1
@@ -424,7 +437,33 @@ _jobs_lock = threading.Lock()
 # ─────────────────────────────────────────────
 @app.route('/')
 def index():
-    return render_template('index.html')
+    if 'logged_in' not in session:
+        return redirect(url_for('login'))
+    return render_template('index.html', username=session.get('username', 'Admin'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT id, password_hash FROM users WHERE username = %s", (username,))
+        user = cursor.fetchone()
+        conn.close()
+        
+        if user and check_password_hash(user['password_hash'], password):
+            session['logged_in'] = True
+            session['username'] = username
+            return redirect(url_for('index'))
+        else:
+            return render_template('login.html', error='Invalid username or password')
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
 
 
 @app.route('/api/new-job', methods=['POST'])
@@ -482,6 +521,22 @@ def upload_lane():
         with _jobs_lock:
             _jobs[job_id]['lanes'][lane]  = result
             _jobs[job_id]['status'][lane] = 'done'
+
+        # --- INSERT INTO DB ---
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        cursor.execute('''INSERT INTO traffic_logs 
+                          (job_id, lane, motor_count, car_count, bus_count, truck_count, density_score, green_duration)
+                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s)''',
+                       (job_id, lane, 
+                        int(result['counts'].get('motor', 0)), 
+                        int(result['counts'].get('car', 0)),
+                        int(result['counts'].get('bus', 0)),
+                        int(result['counts'].get('truck', 0)),
+                        float(result['density']),
+                        int(result['duration'])))
+        conn.commit()
+        conn.close()
 
         return jsonify(result)
 

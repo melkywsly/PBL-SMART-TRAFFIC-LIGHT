@@ -17,8 +17,9 @@ from PIL import Image
 import os
 
 # ==== LOAD TRAINED MODEL ====
-model_path = os.path.join("models", "best.pt")
-model = torch.hub.load("ultralytics/yolov5", "custom", path=model_path, force_reload=True)
+model_path = os.path.join("models", "yolov8n.pt")
+from ultralytics import YOLO
+model = YOLO(model_path)
 
 
 
@@ -73,7 +74,7 @@ print("\n✅ Initial N/S/E/W images selected successfully.\n")
 # ==== UTILITY FUNCTIONS ====
 def get_vehicle_details(results):
     names = model.names
-    classes = [int(cls) for *_, cls in results.xyxy[0]]
+    classes = [int(box.cls[0]) for box in results[0].boxes]
     type_counts = Counter(names[c] for c in classes)
     emergency_flag = any(v in ["ambulance", "fire_truck"] for v in type_counts.keys())
     return len(classes), dict(type_counts), emergency_flag
@@ -82,7 +83,7 @@ def get_vehicle_details(results):
 
 
 def get_avg_confidence(results):
-    confidences = results.xyxy[0][:, 4].tolist()
+    confidences = [float(box.conf[0]) for box in results[0].boxes]
     return sum(confidences) / len(confidences) if confidences else 0
 
 
@@ -93,12 +94,14 @@ def plot_detection(image_path, results, direction, cycle):
     fig, ax = plt.subplots(1, figsize=(10,6))
     ax.imshow(img)
     names = model.names
-    for *box, conf, cls in results.xyxy[0]:
-        x1, y1, x2, y2 = box
+    for box in results[0].boxes:
+        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+        conf = float(box.conf[0])
+        cls = int(box.cls[0])
         w, h = x2 - x1, y2 - y1
         rect = patches.Rectangle((x1, y1), w, h, linewidth=2, edgecolor='red', facecolor='none')
         ax.add_patch(rect)
-        label = f"{names[int(cls)]} {conf:.2f}"
+        label = f"{names[cls]} {conf:.2f}"
         ax.text(x1, y1, label, color='yellow', fontsize=8, bbox=dict(facecolor='black', alpha=0.5))
     plt.title(f"Cycle {cycle} - {direction.capitalize()} Detection")
     plt.axis('off')
@@ -131,7 +134,7 @@ def update_vehicle_count_for_dir(direction, cycle):
     images = all_images_by_dir[direction]
     img_path = images[idx % len(images)]
     image_indices[direction] = (idx + 1) % len(images)
-    results = model(img_path)
+    results = model(img_path, verbose=False)
     total, types, emergency_flag = get_vehicle_details(results)
     conf = get_avg_confidence(results)
     vehicle_counts[direction] = total
@@ -153,7 +156,7 @@ def update_vehicle_count_for_dir(direction, cycle):
 # Initialize vehicle counts, confidence, etc. for first cycle
 for d in directions:
     img_path = selected_images[directions.index(d)]
-    results = model(img_path)
+    results = model(img_path, verbose=False)
     total, types, emergency_flag = get_vehicle_details(results)
     conf = get_avg_confidence(results)
     vehicle_counts[d] = total

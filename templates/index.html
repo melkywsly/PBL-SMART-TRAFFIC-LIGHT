@@ -28,12 +28,18 @@
       <p class="header-meta">4-Lane Adaptive Signal Control · YOLOv8 Ultralytics · Non-Realtime Analysis</p>
       <p id="clock"></p>
     </div>
-    <div class="header-right">
-      <div class="badge">
-        <span class="dot"></span>
-        System Ready
+    <div class="header-right" style="gap: 16px;">
+      <div style="display: flex; gap: 12px; align-items: center; justify-content: flex-end; width: 100%; margin-bottom: 4px;">
+        <span style="font-size: 0.85rem; color: var(--muted);">Hi, {{ username }}</span>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Log Out</a>
       </div>
-      <button class="process-all-btn" id="processAllBtn" disabled>⚙️ Process All Lanes</button>
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <div class="badge">
+          <span class="dot"></span>
+          System Ready
+        </div>
+        <button class="process-all-btn" id="processAllBtn" disabled>⚙️ Process All Lanes</button>
+      </div>
     </div>
   </header>
 
