@@ -657,7 +657,7 @@ exportBtn.addEventListener('click', () => {
         <div class="signal-light red">●</div>
       </div>
       <div class="vehicle-rows">
-        ${vRow('🛵', 'Motor', 0, 0)} ${vRow('🚗', 'Car', 0, 0)}
+        ${vRow('🛵', 'Motorcycle', 0, 0)} ${vRow('🚗', 'Car', 0, 0)}
         ${vRow('🚌', 'Bus', 0, 0)}   ${vRow('🚛', 'Truck', 0, 0)}
       </div>
       <div class="density-row">
