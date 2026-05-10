@@ -487,7 +487,7 @@ function renderCharts(counts, density) {
     data: {
       labels,
       datasets: [
-        { label: '🛵 Motor', data: labels.map(d => counts[d].motor), backgroundColor: 'rgba(0,255,255,.7)' },
+        { label: '🛵 Motorcycle', data: labels.map(d => counts[d].motor), backgroundColor: 'rgba(0,255,255,.7)' },
         { label: '🚗 Car', data: labels.map(d => counts[d].car), backgroundColor: 'rgba(255,200,0,.7)' },
         { label: '🚌 Bus', data: labels.map(d => counts[d].bus), backgroundColor: 'rgba(0,180,255,.7)' },
         { label: '🚛 Truck', data: labels.map(d => counts[d].truck), backgroundColor: 'rgba(255,100,0,.7)' },
@@ -528,7 +528,7 @@ function renderCharts(counts, density) {
     data: {
       labels,
       datasets: [
-        { label: 'Motor', data: labels.map(d => counts[d].motor), borderColor: '#00ffff', backgroundColor: 'rgba(0,255,255,.1)', pointBackgroundColor: '#00ffff' },
+        { label: 'Motorcycle', data: labels.map(d => counts[d].motor), borderColor: '#00ffff', backgroundColor: 'rgba(0,255,255,.1)', pointBackgroundColor: '#00ffff' },
         { label: 'Car', data: labels.map(d => counts[d].car), borderColor: '#ffc800', backgroundColor: 'rgba(255,200,0,.1)', pointBackgroundColor: '#ffc800' },
         { label: 'Bus', data: labels.map(d => counts[d].bus), borderColor: '#00b4ff', backgroundColor: 'rgba(0,180,255,.1)', pointBackgroundColor: '#00b4ff' },
         { label: 'Truck', data: labels.map(d => counts[d].truck), borderColor: '#ff6400', backgroundColor: 'rgba(255,100,0,.1)', pointBackgroundColor: '#ff6400' },
