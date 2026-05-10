@@ -335,14 +335,14 @@ function renderDashboard(data) {
     }
   };
   if (totalByType) {
-    setTypeCard('totalMotor', totalByType.motor ?? 0);
+    setTypeCard('totalMotorcycle', totalByType.motorcycle ?? 0);
     setTypeCard('totalCar', totalByType.car ?? 0);
     setTypeCard('totalBus', totalByType.bus ?? 0);
     setTypeCard('totalTruck', totalByType.truck ?? 0);
   } else {
     // Fallback: sum from per-lane counts
     const sumType = t => DIRECTIONS.reduce((s, d) => s + (counts[d]?.[t] || 0), 0);
-    setTypeCard('totalMotor', sumType('motor'));
+    setTypeCard('totalMotorcycle', sumType('motorcycle'));
     setTypeCard('totalCar', sumType('car'));
     setTypeCard('totalBus', sumType('bus'));
     setTypeCard('totalTruck', sumType('truck'));
@@ -430,7 +430,7 @@ function renderSignalCards(counts, density, green, duration) {
         <div class="signal-light ${isGreen ? 'green' : 'red'}">●</div>
       </div>
       <div class="vehicle-rows">
-        ${vRow('🛵', 'Motor', c.motor, barPct(c.motor))}
+        ${vRow('🛵', 'Motorcycle', c.motorcycle, barPct(c.motorcycle))}
         ${vRow('🚗', 'Car', c.car, barPct(c.car))}
         ${vRow('🚌', 'Bus', c.bus, barPct(c.bus))}
         ${vRow('🚛', 'Truck', c.truck, barPct(c.truck))}
@@ -487,7 +487,7 @@ function renderCharts(counts, density) {
     data: {
       labels,
       datasets: [
-        { label: '🛵 Motorcycle', data: labels.map(d => counts[d].motor), backgroundColor: 'rgba(0,255,255,.7)' },
+        { label: '🛵 Motorcycle', data: labels.map(d => counts[d].motorcycle), backgroundColor: 'rgba(0,255,255,.7)' },
         { label: '🚗 Car', data: labels.map(d => counts[d].car), backgroundColor: 'rgba(255,200,0,.7)' },
         { label: '🚌 Bus', data: labels.map(d => counts[d].bus), backgroundColor: 'rgba(0,180,255,.7)' },
         { label: '🚛 Truck', data: labels.map(d => counts[d].truck), backgroundColor: 'rgba(255,100,0,.7)' },
@@ -528,7 +528,7 @@ function renderCharts(counts, density) {
     data: {
       labels,
       datasets: [
-        { label: 'Motorcycle', data: labels.map(d => counts[d].motor), borderColor: '#00ffff', backgroundColor: 'rgba(0,255,255,.1)', pointBackgroundColor: '#00ffff' },
+        { label: 'Motorcycle', data: labels.map(d => counts[d].motorcycle), borderColor: '#00ffff', backgroundColor: 'rgba(0,255,255,.1)', pointBackgroundColor: '#00ffff' },
         { label: 'Car', data: labels.map(d => counts[d].car), borderColor: '#ffc800', backgroundColor: 'rgba(255,200,0,.1)', pointBackgroundColor: '#ffc800' },
         { label: 'Bus', data: labels.map(d => counts[d].bus), borderColor: '#00b4ff', backgroundColor: 'rgba(0,180,255,.1)', pointBackgroundColor: '#00b4ff' },
         { label: 'Truck', data: labels.map(d => counts[d].truck), borderColor: '#ff6400', backgroundColor: 'rgba(255,100,0,.1)', pointBackgroundColor: '#ff6400' },
@@ -619,9 +619,9 @@ exportBtn.addEventListener('click', () => {
   const hasTypes = logData[0].motor !== undefined;
   let header, rows;
   if (hasTypes) {
-    header = 'Frame,Motor,Car,Bus,Truck,Active,Tracked\n';
+    header = 'Frame,Motorcycle,Car,Bus,Truck,Active,Tracked\n';
     rows = logData.map(r =>
-      `${r.frame},${r.motor || 0},${r.car || 0},${r.bus || 0},${r.truck || 0},${r.total || 0},${r.totalTracked || 0}`
+      `${r.frame},${r.motorcycle || 0},${r.car || 0},${r.bus || 0},${r.truck || 0},${r.total || 0},${r.totalTracked || 0}`
     ).join('\n');
   } else {
     header = 'Frame,North,East,South,West,Total\n';
