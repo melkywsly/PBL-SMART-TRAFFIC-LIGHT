@@ -117,6 +117,48 @@ All detection results, vehicle counts, density scores, and signal decisions are 
 
 ---
 
+## Project Structure
+
+```
+PBL-SMART-TRAFFIC-LIGHT/
+│
+├── app.py                        # Flask app — main entry point
+├── adaptive-traffic.py           # Standalone simulation script (console)
+├── requirements.txt              # Python dependencies
+├── run.bat                       # Windows one-click launcher
+├── data.yaml                     # Dataset class configuration
+├── README.md
+│
+├── models/                       # YOLO model weights (not tracked by git)
+│   └── best_traffic_vehicle_yolov5.pt   # ← place your model here
+│
+├── uploads/                      # Uploaded CCTV videos/images (auto-created)
+│
+├── processed/                    # Annotated output videos (auto-created)
+│
+├── templates/                    # Flask HTML templates
+│   ├── index.html                # Main dashboard
+│   └── login.html                # Login page
+│
+├── static/                       # CSS, JS assets
+│   ├── css/
+│   └── js/
+│
+├── outputs/                      # Detection result images
+│   ├── val_batch2_pred.png
+│   └── colab_output.png
+│
+└── plots/                        # Performance visualization charts
+    ├── PR_curve.png
+    ├── average_confidence.png
+    ├── confusion_matrix.png
+    └── cycle_log.png
+```
+
+> **Note:** The `models/`, `uploads/`, and `processed/` directories are tracked in git (via `.gitkeep`) but their contents are ignored. After cloning, download your model weights and place them in `models/` before running the app.
+
+---
+
 ## Installation
 
 ### 1. Clone the repository

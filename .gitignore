@@ -6,6 +6,7 @@ __pycache__/
 *.pyo
 *.pyd
 *.sqlite3
+*.db
 
 # Virtual environment
 venv/
@@ -13,28 +14,56 @@ venv/
 .venv/
 
 # =========================
-# Model (YOLO / AI)
+# Model weights (terlalu besar untuk GitHub)
+# Folder models/ tetap masuk via .gitkeep
 # =========================
 models/*.pt
 models/*.onnx
 models/*.engine
 
 # =========================
-# Output hasil processing
+# Upload video (besar, private)
+# Folder uploads/ tetap masuk via .gitkeep
 # =========================
-outputs/
-processed/
-plots/
-output/
+uploads/*
+!uploads/.gitkeep
 
 # =========================
-# Upload / Video / Dataset
+# Hasil processing video
+# Folder processed/ tetap masuk via .gitkeep
 # =========================
-uploads/
+processed/*
+!processed/.gitkeep
+
+# =========================
+# Output & plots (generated files)
+# Folder tetap masuk via .gitkeep
+# =========================
+outputs/*
+!outputs/.gitkeep
+!outputs/val_batch2_pred.png
+!outputs/colab_output.png
+
+plots/*
+!plots/.gitkeep
+!plots/PR_curve.png
+!plots/average_confidence.png
+!plots/confusion_matrix.png
+!plots/cycle_log.png
+
+output/*
+!output/.gitkeep
+
+# =========================
+# Video files
+# =========================
 *.mp4
 *.avi
 *.mov
 
+# =========================
+# Dataset
+# =========================
 sample_dataset_images/
 
 # =========================
@@ -56,6 +85,6 @@ Thumbs.db
 .env
 
 # =========================
-# Static generated (optional)
+# Static generated
 # =========================
 static/cache/
