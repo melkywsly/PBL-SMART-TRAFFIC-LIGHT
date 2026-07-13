@@ -70,20 +70,21 @@ function buildLaneSlots() {
       </div>
 
       <div class="lane-upload-area" id="uploadArea-${d}">
-        <input type="file" id="fileInput-${d}" accept="video/*" />
+        <input type="file" id="fileInput-${d}" accept="video/*,image/*" />
         <div class="lane-upload-icon">🎬</div>
         <p>Drag &amp; drop or <span class="browse" id="browseBtn-${d}">browse</span></p>
-        <p style="font-size:.7rem;margin-top:4px">MP4, AVI, MOV, etc.</p>
+        <p style="font-size:.7rem;margin-top:4px">Video (MP4, AVI) or Image (JPG, PNG)</p>
       </div>
 
       <div class="lane-filename" id="filename-${d}"></div>
 
-      <!-- Original uploaded video preview -->
+      <!-- Original upload preview (video or image) -->
       <div class="lane-preview-wrap" id="origWrap-${d}">
-        <video class="lane-video-preview" id="preview-${d}" controls></video>
+        <video class="lane-video-preview" id="preview-${d}" controls style="display:none"></video>
+        <img id="previewImg-${d}" style="display:none;width:100%;border-radius:8px" />
         <div class="lane-placeholder" id="placeholder-${d}">
           <span class="ph-icon">📹</span>
-          <span>${d} camera video</span>
+          <span>${d} camera</span>
         </div>
       </div>
 
@@ -95,11 +96,12 @@ function buildLaneSlots() {
         ⚙️ Process ${d}
       </button>
 
-      <!-- Processed output video (hidden until done) -->
+      <!-- Processed output (hidden until done) -->
       <div class="lane-output-wrap" id="outputWrap-${d}" style="display:none">
         <div class="lane-output-label">🎯 Processed Output — Bounding Box Detection</div>
-        <video class="lane-video-preview lane-output-video" id="outputVideo-${d}" controls></video>
-        <a class="lane-download-btn" id="downloadBtn-${d}" download>⬇ Download Processed Video</a>
+        <video class="lane-video-preview lane-output-video" id="outputVideo-${d}" controls style="display:none"></video>
+        <img id="outputImg-${d}" style="display:none;width:100%;border-radius:8px" />
+        <a class="lane-download-btn" id="downloadBtn-${d}" download>⬇ Download Processed</a>
       </div>
     </div>
   `).join('');
@@ -135,8 +137,10 @@ function buildLaneSlots() {
 // HANDLE FILE SELECTION per lane
 // ─────────────────────────────────────────────
 function handleLaneFile(dir, file) {
-  if (!file.type.startsWith('video/')) {
-    showToast(`❌ Please select a valid video for ${dir} lane.`, 'error');
+  const isVideo = file.type.startsWith('video/');
+  const isImage = file.type.startsWith('image/');
+  if (!isVideo && !isImage) {
+    showToast(`❌ Please select a video or image for ${dir} lane.`, 'error');
     return;
   }
 
@@ -147,18 +151,25 @@ function handleLaneFile(dir, file) {
   document.getElementById(`filename-${dir}`).textContent =
     `📁 ${file.name}  (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
 
-  const preview = document.getElementById(`preview-${dir}`);
-  const ph = document.getElementById(`placeholder-${dir}`);
-  preview.src = URL.createObjectURL(file);
-  preview.style.display = 'block';
+  const preview    = document.getElementById(`preview-${dir}`);
+  const previewImg = document.getElementById(`previewImg-${dir}`);
+  const ph         = document.getElementById(`placeholder-${dir}`);
   ph.style.display = 'none';
+
+  if (isImage) {
+    previewImg.src = URL.createObjectURL(file);
+    previewImg.style.display = 'block';
+    preview.style.display = 'none';
+  } else {
+    preview.src = URL.createObjectURL(file);
+    preview.style.display = 'block';
+    previewImg.style.display = 'none';
+  }
 
   document.getElementById(`processBtn-${dir}`).disabled = false;
 
-  // Update "Lane Ready" counter
   updateLanesReadyCard();
 
-  // Enable "Process All" if at least 1 lane has a file
   const anyFile = DIRECTIONS.some(d => laneFiles[d] !== null);
   processAllBtn.disabled = !anyFile;
 }
@@ -193,13 +204,16 @@ async function processLane(dir) {
 
   setLaneState(dir, 'processing');
 
+  const isImage = file.type.startsWith('image/');
   const fd = new FormData();
-  fd.append('video', file);
+  fd.append(isImage ? 'image' : 'video', file);
   fd.append('lane', dir);
   fd.append('jobId', jobId);
 
+  const endpoint = isImage ? '/api/upload-lane-image' : '/api/upload-lane';
+
   try {
-    const resp = await fetch('/api/upload-lane', { method: 'POST', body: fd });
+    const resp = await fetch(endpoint, { method: 'POST', body: fd });
     const data = await resp.json();
 
     if (!resp.ok || data.error) throw new Error(data.error || 'Server error');
@@ -207,19 +221,31 @@ async function processLane(dir) {
     setLaneState(dir, 'done');
     showToast(`✅ ${dir} lane processed!`, 'success');
 
-    // ── Show processed video inline in the lane slot ──
-    if (data.outputVideo) {
+    // ── Show processed output inline ──
+    const outputUrl = data.outputVideo || data.outputImage;
+    if (outputUrl) {
       const outputWrap = document.getElementById(`outputWrap-${dir}`);
-      const outputVid = document.getElementById(`outputVideo-${dir}`);
-      const dlBtn = document.getElementById(`downloadBtn-${dir}`);
-      outputVid.src = data.outputVideo + '?t=' + Date.now(); // cache-bust
-      dlBtn.href = data.outputVideo;
-      dlBtn.download = `processed_${dir}.mp4`;
+      const outputVid  = document.getElementById(`outputVideo-${dir}`);
+      const outputImg  = document.getElementById(`outputImg-${dir}`);
+      const dlBtn      = document.getElementById(`downloadBtn-${dir}`);
+
+      if (data.outputVideo) {
+        outputVid.src = data.outputVideo + '?t=' + Date.now();
+        outputVid.style.display = 'block';
+        outputImg.style.display = 'none';
+        dlBtn.href = data.outputVideo;
+        dlBtn.download = `processed_${dir}.mp4`;
+        outputVid.load();
+      } else {
+        outputImg.src = data.outputImage + '?t=' + Date.now();
+        outputImg.style.display = 'block';
+        outputVid.style.display = 'none';
+        dlBtn.href = data.outputImage;
+        dlBtn.download = `processed_${dir}.jpg`;
+      }
       outputWrap.style.display = 'block';
-      outputVid.load();
     }
 
-    // Refresh aggregate results
     await fetchAndRenderResults();
 
   } catch (err) {
@@ -370,17 +396,22 @@ function renderDashboard(data) {
   // ── Signal cards ──
   renderSignalCards(counts, density, green, duration);
 
-  // ── Processed videos ──
+  // ── Processed outputs (video or image) ──
+  const outputTypes = data.outputTypes || {};
   if (outputVideos && Object.keys(outputVideos).length > 0) {
     outputsSection.style.display = 'block';
     outputsGrid.innerHTML = DIRECTIONS
       .filter(d => outputVideos[d])
-      .map(d => `
-        <div class="output-box">
+      .map(d => {
+        const isImg = outputTypes[d] === 'image';
+        const media = isImg
+          ? `<img src="${outputVideos[d]}" style="width:100%;border-radius:8px" />`
+          : `<video src="${outputVideos[d]}" controls></video>`;
+        return `<div class="output-box">
           <h4>${d === green ? '🟢' : '🔴'} ${d} Lane Output</h4>
-          <video src="${outputVideos[d]}" controls></video>
-        </div>`
-      ).join('');
+          ${media}
+        </div>`;
+      }).join('');
   }
 
   // ── Charts ──

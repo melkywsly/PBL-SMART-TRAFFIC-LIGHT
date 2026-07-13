@@ -1,4 +1,12 @@
 import os
+import sys
+
+# Pastikan venv site-packages selalu dipakai, apapun Python yang menjalankan file ini
+_venv_site = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           'venv', 'Lib', 'site-packages')
+if os.path.isdir(_venv_site) and _venv_site not in sys.path:
+    sys.path.insert(0, _venv_site)
+
 import cv2
 import torch
 import numpy as np
@@ -16,7 +24,7 @@ from werkzeug.utils import secure_filename
 BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER    = os.path.join(BASE_DIR, 'uploads')
 PROCESSED_FOLDER = os.path.join(BASE_DIR, 'processed')
-MODEL_PATH       = os.path.join(BASE_DIR, 'models', 'yolov8n.pt')
+MODEL_PATH       = os.path.join(BASE_DIR, 'models', 'best_traffic_vehicle_yolov5.pt')
 
 os.makedirs(UPLOAD_FOLDER,    exist_ok=True)
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
@@ -41,27 +49,57 @@ def get_model():
     global _model
     with _model_lock:
         if _model is None:
-            from ultralytics import YOLO
-            # Initialize YOLOv8 model natively
-            _model = YOLO(MODEL_PATH)
+            import yolov5
+            import functools
+            import pathlib
+
+            # Model dilatih di Linux (Colab) → checkpoint menyimpan PosixPath.
+            pathlib.PosixPath = pathlib.WindowsPath
+
+            # PyTorch 2.6+ mengubah default weights_only=True yang memblokir
+            # kelas custom di checkpoint YOLOv5.
+            _orig_load = torch.load
+            torch.load = functools.partial(_orig_load, weights_only=False)
+            try:
+                _model = yolov5.load(MODEL_PATH)
+            finally:
+                torch.load = _orig_load
+
+            _model.conf = 0.45
+            _model.iou  = 0.45
+            print(f"[Model loaded] classes: {list(_model.names.values())}")
     return _model
+
+
+def _run_inference(model, frame):
+    """Run YOLOv5 inference and return normalised detection list.
+
+    Returns list of (x1, y1, x2, y2, label_name, conf).
+    """
+    results = model(frame)
+    out = []
+    for *box, conf, cls in results.xyxy[0].tolist():
+        x1, y1, x2, y2 = map(int, box)
+        label_name = model.names[int(cls)]
+        out.append((x1, y1, x2, y2, label_name, float(conf)))
+    return out
 
 
 # ─────────────────────────────────────────────
 # LABEL → CATEGORY MAPPING
 # ─────────────────────────────────────────────
 LABEL_MAP = {
-    # COCO dataset classes mapping
-    'motorcycle': 'motor', 'bicycle': 'motor',
-    'car': 'car',
-    'bus': 'bus',
-    'truck': 'truck',
-    # Original custom dataset mappings just in case
-    'bikes': 'motor', 'scooter': 'motor', 'e-rickshaw': 'motor',
-    'SUV': 'car', 'taxi': 'car', 'van': 'car', 'auto_rickshaw': 'car',
-    'micro_bus': 'bus', 'school_bus': 'bus',
-    'mini_truck': 'truck', 'tempo': 'truck',
+    'motorcycle': 'motor', 'bicycle': 'motor', 'motor': 'motor',
+    'motorbike': 'motor', 'bikes': 'motor', 'scooter': 'motor',
+    'sepeda_motor': 'motor', 'motor_besar': 'motor',
+    'car': 'car', 'SUV': 'car', 'taxi': 'car', 'van': 'car',
+    'pickup': 'car', 'minivan': 'car', 'mobil': 'car',
+    'auto_rickshaw': 'car', 'kendaraan_ringan': 'car',
+    'bus': 'bus', 'micro_bus': 'bus', 'school_bus': 'bus',
+    'minibus': 'bus', 'angkot': 'bus', 'angkutan': 'bus',
+    'truck': 'truck', 'mini_truck': 'truck', 'tempo': 'truck',
     'tractor': 'truck', 'transport_vehicle': 'truck',
+    'heavy_vehicle': 'truck', 'truk': 'truck', 'kendaraan_berat': 'truck',
 }
 
 WEIGHTS    = {'motor': 1, 'car': 2, 'bus': 3, 'truck': 3}
@@ -91,7 +129,7 @@ def get_green_duration(density):
 # Each lane video is processed in full-frame (no triangular ROI split).
 # The whole frame = that lane's camera view.
 # ─────────────────────────────────────────────
-SAMPLE_INTERVAL = 5   # process every Nth frame
+SAMPLE_INTERVAL = 3   # process every Nth frame (lower = finer tracking, less ID switching)
 
 # ── Minimum bounding-box area (px²) to accept a detection ──
 # Raised to 2000 since we're only looking for cars, which are larger.
@@ -106,16 +144,6 @@ MIN_BOX_AREA = 2000
 MOTOR_MAX_AREA = 8000
 
 def smart_category(category, x1, y1, x2, y2):
-    """Post-processing reclassification — tuned for highway footage.
-
-    The user specified: "ini motor tidak ada ini semua mobil" 
-    (there are no motorcycles here, these are all cars).
-    We forcefully reclassify all 'motor' detections as 'car' 
-    to prevent bounding box flickering and class glitches.
-    """
-    if category == 'motor':
-        return 'car'
-
     return category
 
 
@@ -147,62 +175,65 @@ def _box_diag(box):
     return max(((box[2]-box[0])**2 + (box[3]-box[1])**2) ** 0.5, 1.0)
 
 
+def _dedup_detections(detections, iou_thresh=0.5):
+    """Collapse multiple detections that are really the same physical
+    vehicle.
+
+    Ultralytics applies NMS internally, but only *within* each class — if
+    the model is unsure and emits e.g. both a 'car' and a 'truck' box for
+    the same overhead vehicle, both survive NMS and arrive here as two
+    separate detections. Left alone, the tracker spins up two parallel
+    track chains for one real vehicle, inflating the total count even
+    when the position-matching logic is working correctly. Keep only the
+    highest-confidence box in each overlapping group, regardless of class.
+    """
+    dets = sorted(detections, key=lambda d: d[5], reverse=True)
+    kept = []
+    for d in dets:
+        if all(_iou(d[:4], k[:4]) < iou_thresh for k in kept):
+            kept.append(d)
+    return kept
+
+
 class SimpleTracker:
-    """Robust 2-stage tracker that avoids double-counting on detection blinks.
+    """2-stage tracker with confirmation gate to suppress phantom IDs.
 
-    When YOLO misses a vehicle for 1-2 sampled frames (blink), the box
-    position can change enough that IoU drops to zero even though it is
-    the same vehicle.  A centroid-distance fallback stage catches these
-    cases and re-links the detection to the existing track, keeping the
-    ID stable and the cumulative count accurate.
-
-    Tuning parameters
-    -----------------
-    iou_threshold     : min IoU for Stage-1 match  (0.10 — very permissive)
-    dist_threshold    : max normalised centroid distance for Stage-2 match
-                        (1.0 means the centroid can move up to ~1 box diagonal)
-    max_lost          : sampled frames before a track is pruned
-                        (20 samples × 5 frame-interval ≈ 4 s at 25 fps)
-    alpha             : EMA smoothing for box position (0 = no smoothing)
-
-    Attributes
-    ----------
-    total_counted : int   — cumulative unique vehicles (no double-count)
-    cat_counts    : dict  — cumulative count by category
+    A new track is only added to total_counted after it has been matched
+    for min_confirmed consecutive sampled frames. Single-frame false
+    positives (low-conf detections at frame edges, shadows, etc.) are
+    silently discarded before they inflate the count.
     """
 
     def __init__(self,
                  iou_threshold: float = 0.10,
-                 dist_threshold: float = 1.0,
-                 max_lost: int = 20):
-        self.tracks         = {}   # tid -> {'box', 'cat', 'lost', 'conf'}
+                 dist_threshold: float = 1.5,
+                 max_lost: int = 20,
+                 min_confirmed: int = 4):
+        self.tracks         = {}
         self.next_id        = 1
         self.iou_threshold  = iou_threshold
         self.dist_threshold = dist_threshold
         self.max_lost       = max_lost
+        self.min_confirmed  = min_confirmed
         self.total_counted  = 0
         self.cat_counts     = {'motor': 0, 'car': 0, 'bus': 0, 'truck': 0}
 
     def _assign(self, tid, det):
-        """Link detection to track tid, updating box + resetting lost."""
-        self.tracks[tid].update({
-            'box':  list(det[:4]),
-            'cat':  det[4],
-            'conf': det[5],
-            'lost': 0,
-        })
+        t = self.tracks[tid]
+        t['box']  = list(det[:4])
+        t['cat']  = det[4]
+        t['conf'] = det[5]
+        t['lost'] = 0
+        t['hits'] = t.get('hits', 0) + 1
+
+        # Confirm track the first time hits reaches min_confirmed
+        if not t.get('confirmed') and t['hits'] >= self.min_confirmed:
+            t['confirmed'] = True
+            self.total_counted += 1
+            if t['cat'] in self.cat_counts:
+                self.cat_counts[t['cat']] += 1
 
     def update(self, detections):
-        """Match detections to tracks; return currently-visible tracked objects.
-
-        Parameters
-        ----------
-        detections : list of (x1, y1, x2, y2, category, conf)
-
-        Returns
-        -------
-        list of (x1, y1, x2, y2, category, conf, track_id)
-        """
         track_ids    = list(self.tracks.keys())
         matched_tids = set()
         matched_dets = set()
@@ -224,8 +255,6 @@ class SimpleTracker:
                 self._assign(best_tid, det)
 
         # ── Stage 2: centroid-distance fallback ───────────────────────
-        # For unmatched detections, try to link to an unmatched track
-        # via normalised centroid distance (handles blink / partial miss).
         remaining_tids = [tid for tid in track_ids if tid not in matched_tids]
         for i, det in enumerate(detections):
             if i in matched_dets:
@@ -238,7 +267,8 @@ class SimpleTracker:
                     continue
                 tb = self.tracks[tid]['box']
                 tx, ty = _centroid(tb)
-                dist = ((cx - tx) ** 2 + (cy - ty) ** 2) ** 0.5 / _box_diag(tb)
+                norm = max((_box_diag(tb) + _box_diag(det[:4])) / 2.0, 25.0)
+                dist = ((cx - tx) ** 2 + (cy - ty) ** 2) ** 0.5 / norm
                 if dist < best_dist:
                     best_dist = dist
                     best_tid  = tid
@@ -247,20 +277,18 @@ class SimpleTracker:
                 matched_dets.add(i)
                 self._assign(best_tid, det)
 
-        # ── Create new tracks for genuinely new vehicles ───────────────
+        # ── Create tentative tracks (not counted yet) ──────────────────
         for i, det in enumerate(detections):
             if i not in matched_dets:
                 tid = self.next_id
-                self.next_id       += 1
-                self.total_counted += 1
-                cat = det[4]
-                if cat in self.cat_counts:
-                    self.cat_counts[cat] += 1
+                self.next_id += 1
                 self.tracks[tid] = {
-                    'box':  list(det[:4]),
-                    'cat':  cat,
-                    'conf': det[5],
-                    'lost': 0,
+                    'box':       list(det[:4]),
+                    'cat':       det[4],
+                    'conf':      det[5],
+                    'lost':      0,
+                    'hits':      1,
+                    'confirmed': False,
                 }
 
         # ── Age unmatched tracks ───────────────────────────────────────
@@ -268,19 +296,91 @@ class SimpleTracker:
             if tid not in matched_tids:
                 self.tracks[tid]['lost'] += 1
 
-        # ── Prune tracks dead for too long ─────────────────────────────
+        # ── Prune dead tracks ──────────────────────────────────────────
         dead = [tid for tid, t in self.tracks.items() if t['lost'] > self.max_lost]
         for tid in dead:
             del self.tracks[tid]
 
-        # ── Return visible tracks (lost == 0) ─────────────────────────
+        # ── Return only confirmed + visible tracks ─────────────────────
         return [
             (int(t['box'][0]), int(t['box'][1]),
              int(t['box'][2]), int(t['box'][3]),
              t['cat'], t['conf'], tid)
-            for tid, t in self.tracks.items() if t['lost'] == 0
+            for tid, t in self.tracks.items()
+            if t['lost'] == 0 and t.get('confirmed')
         ]
 
+
+
+def process_lane_image(image_path, output_path):
+    """Process a single still image: detect vehicles, draw boxes, save annotated image."""
+    model = get_model()
+    frame = cv2.imread(image_path)
+    if frame is None:
+        raise ValueError("Cannot open image file.")
+
+    raw = _run_inference(model, frame)
+
+    detections = []
+    for (x1, y1, x2, y2, label_name, conf) in raw:
+        if conf < 0.40:
+            continue
+        bw, bh = x2 - x1, y2 - y1
+        if bw * bh < MIN_BOX_AREA:
+            continue
+        if bw / max(bh, 1) < 0.6:
+            continue
+
+        category = LABEL_MAP.get(label_name)
+        if not category:
+            continue
+
+        category = smart_category(category, x1, y1, x2, y2)
+        detections.append((x1, y1, x2, y2, category, conf))
+
+    # Collapse same-vehicle detections that landed in different classes.
+    detections = _dedup_detections(detections)
+
+    counts = {'motor': 0, 'car': 0, 'bus': 0, 'truck': 0}
+    for i, (x1, y1, x2, y2, category, conf) in enumerate(detections):
+        counts[category] += 1
+
+        color = VEHICLE_COLORS.get(category, (255, 255, 255))
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        label_text = f"{category} #{i+1} {conf:.2f}"
+        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        label_y = max(y1 - 6, th + 4)
+        cv2.rectangle(frame, (x1, label_y - th - 4), (x1 + tw + 4, label_y), color, -1)
+        cv2.putText(frame, label_text, (x1 + 2, label_y - 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+
+    total = sum(counts.values())
+    hud_text = f"Total Vehicles: {total}"
+    (hw, hh), _ = cv2.getTextSize(hud_text, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
+    cv2.rectangle(frame, (6, 6), (hw + 22, hh + 20), (0, 0, 0), -1)
+    cv2.putText(frame, hud_text, (12, hh + 12),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+    cv2.imwrite(output_path, frame)
+
+    density = (counts['motor'] * WEIGHTS['motor'] +
+               counts['car']   * WEIGHTS['car']   +
+               counts['bus']   * WEIGHTS['bus']   +
+               counts['truck'] * WEIGHTS['truck'])
+
+    return {
+        'counts':       dict(counts),
+        'peakCounts':   dict(counts),
+        'totalTracked': total,
+        'density':      density,
+        'duration':     get_green_duration(density),
+        'frameLog': [{
+            'frame': 1,
+            'motor': counts['motor'], 'car': counts['car'],
+            'bus':   counts['bus'],   'truck': counts['truck'],
+            'total': total, 'totalTracked': total,
+        }],
+    }
 
 
 def process_lane_video(video_path, output_path):
@@ -309,7 +409,11 @@ def process_lane_video(video_path, output_path):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out    = cv2.VideoWriter(output_path, fourcc, max(fps / SAMPLE_INTERVAL, 5), (w, h))
 
-    tracker     = SimpleTracker(iou_threshold=0.10, dist_threshold=1.0, max_lost=20)
+    # Keep a track alive for ~4s of real video time regardless of fps,
+    # so a vehicle briefly missed by detection isn't re-counted as new.
+    max_lost = max(15, int(round(fps * 4 / SAMPLE_INTERVAL)))
+    tracker  = SimpleTracker(iou_threshold=0.10, dist_threshold=1.5,
+                             max_lost=max_lost, min_confirmed=4)
     peak_counts = {'motor': 0, 'car': 0, 'bus': 0, 'truck': 0}
     frame_log   = []
     frame_num   = 0
@@ -322,19 +426,13 @@ def process_lane_video(video_path, output_path):
         if frame_num % SAMPLE_INTERVAL != 0:
             continue
 
-        # YOLOv8 inference
-        results = model(frame, verbose=False)
-        names   = model.names
+        # YOLOv5 inference
+        raw = _run_inference(model, frame)
 
         # ── Build detection list for this frame ──
         detections = []
-        for box in results[0].boxes:
-            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-            conf = float(box.conf[0])
-            cls  = int(box.cls[0])
-
-            # Apply hard confidence threshold (simulating previous model.conf = 0.35)
-            if conf < 0.35:
+        for (x1, y1, x2, y2, label_name, conf) in raw:
+            if conf < 0.50:
                 continue
 
             bw = x2 - x1
@@ -342,20 +440,21 @@ def process_lane_video(video_path, output_path):
 
             if bw * bh < MIN_BOX_AREA:
                 continue
-                
-            # Discard tall/skinny bounding boxes (aspect ratio < 0.6) 
-            # These are typically false positives like dashed road lines.
+
             aspect_ratio = bw / max(bh, 1)
-            if aspect_ratio < 0.6:
+            if aspect_ratio < 0.8:
                 continue
 
-            label_name = names[cls]
-            category   = LABEL_MAP.get(label_name)
+            category = LABEL_MAP.get(label_name)
             if not category:
                 continue
 
             category = smart_category(category, x1, y1, x2, y2)
             detections.append((x1, y1, x2, y2, category, conf))
+
+        # Collapse same-vehicle detections that landed in different classes
+        # before they ever reach the tracker.
+        detections = _dedup_detections(detections)
 
         # ── Update tracker ──
         # Pass full detections including conf to tracker
@@ -555,6 +654,76 @@ def upload_lane():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/upload-lane-image', methods=['POST'])
+def upload_lane_image():
+    """Upload + process a single lane image.
+    Form fields: jobId, lane (North|East|South|West), image (file)
+    """
+    job_id = request.form.get('jobId', '').strip()
+    lane   = request.form.get('lane',  '').strip()
+
+    if lane not in DIRECTIONS:
+        return jsonify({'error': f'Invalid lane "{lane}". Must be one of {DIRECTIONS}.'}), 400
+
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image file uploaded.'}), 400
+
+    file = request.files['image']
+    if not file.filename:
+        return jsonify({'error': 'Empty filename.'}), 400
+
+    with _jobs_lock:
+        if job_id not in _jobs:
+            _jobs[job_id] = {
+                'lanes':  {d: None for d in DIRECTIONS},
+                'status': {d: 'pending' for d in DIRECTIONS},
+            }
+        _jobs[job_id]['status'][lane] = 'processing'
+
+    uid      = str(uuid.uuid4())[:8]
+    filename = secure_filename(file.filename)
+    ext      = os.path.splitext(filename)[1].lower() or '.jpg'
+    in_path  = os.path.join(UPLOAD_FOLDER,    f"{lane}_{uid}_{filename}")
+    out_name = f"processed_{lane}_{uid}{ext}"
+    out_path = os.path.join(PROCESSED_FOLDER, out_name)
+
+    file.save(in_path)
+
+    try:
+        result = process_lane_image(in_path, out_path)
+        result['outputImage'] = f'/processed/{out_name}'
+        result['lane']        = lane
+
+        with _jobs_lock:
+            _jobs[job_id]['lanes'][lane]  = result
+            _jobs[job_id]['status'][lane] = 'done'
+
+        try:
+            conn = mysql.connector.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            cursor.execute('''INSERT INTO traffic_logs
+                              (job_id, lane, motor_count, car_count, bus_count, truck_count, density_score, green_duration)
+                              VALUES (%s, %s, %s, %s, %s, %s, %s, %s)''',
+                           (job_id, lane,
+                            int(result['counts'].get('motor', 0)),
+                            int(result['counts'].get('car', 0)),
+                            int(result['counts'].get('bus', 0)),
+                            int(result['counts'].get('truck', 0)),
+                            float(result['density']),
+                            int(result['duration'])))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+        return jsonify(result)
+
+    except Exception as e:
+        with _jobs_lock:
+            _jobs[job_id]['status'][lane] = 'error'
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/results/<job_id>', methods=['GET'])
 def get_results(job_id):
     """Return combined 4-lane results for a job.
@@ -573,7 +742,7 @@ def get_results(job_id):
         return jsonify({'status': 'pending', 'message': 'No lanes processed yet.'}), 202
 
     density = {d: (done_lanes[d]['density'] if d in done_lanes else 0) for d in DIRECTIONS}
-    counts  = {d: (done_lanes[d]['counts']  if d in done_lanes else {'motor':0,'car':0,'bus':0,'truck':0})
+    counts  = {d: (done_lanes[d]['counts']  if d in done_lanes else {'motor': 0, 'car': 0, 'bus': 0, 'truck': 0})
                for d in DIRECTIONS}
 
     # Adaptive signal: lane with highest density gets GREEN
@@ -598,13 +767,8 @@ def get_results(job_id):
             fn = entry['frame']
             if fn not in combined_log:
                 combined_log[fn] = {
-                    'frame':        fn,
-                    'motor':        0,
-                    'car':          0,
-                    'bus':          0,
-                    'truck':        0,
-                    'total':        0,
-                    'totalTracked': 0,
+                    'frame': fn, 'motor': 0, 'car': 0,
+                    'bus': 0, 'truck': 0, 'total': 0, 'totalTracked': 0,
                 }
             combined_log[fn]['motor']        += entry.get('motor', 0)
             combined_log[fn]['car']          += entry.get('car',   0)
@@ -624,7 +788,8 @@ def get_results(job_id):
         'totalVehicles': total,
         'totalByType':   total_by_type,
         'decisionLog':   decision_log,
-        'outputVideos':  {d: done_lanes[d]['outputVideo'] for d in done_lanes},
+        'outputVideos':  {d: done_lanes[d].get('outputVideo') or done_lanes[d].get('outputImage') for d in done_lanes},
+        'outputTypes':   {d: ('image' if 'outputImage' in done_lanes[d] else 'video') for d in done_lanes},
     })
 
 
@@ -648,5 +813,7 @@ def serve_upload(filename):
 
 
 if __name__ == '__main__':
+    print("Loading model, please wait...")
+    get_model()
     print("Smart Traffic Dashboard (4-Lane) -- http://127.0.0.1:5000")
     app.run(debug=True, port=5000)
