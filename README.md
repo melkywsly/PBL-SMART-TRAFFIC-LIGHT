@@ -63,8 +63,8 @@ All detection results, vehicle counts, density scores, and signal decisions are 
 
 ```
 ┌─────────────────────────────────────────────┐
-│              Web Dashboard (Flask)           │
-│   Upload video/image per lane direction      │
+│              Web Dashboard (Flask)          │
+│   Upload video/image per lane direction     │
 └────────────────────┬────────────────────────┘
                      │
          ┌───────────▼────────────┐
@@ -81,7 +81,7 @@ All detection results, vehicle counts, density scores, and signal decisions are 
      ┌───────────────▼───────────────┐
      │   Density & Signal Timing     │
      │   Weighted score → Duration   │
-     │   (motor×1, car×2, bus/truck×3)│
+     │ (motor×1, car×2, bus/truck×3) │
      └───────────────┬───────────────┘
                      │
          ┌───────────▼────────────┐
